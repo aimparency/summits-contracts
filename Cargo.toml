@@ -1,5 +1,5 @@
 [package]
-name = "summits-contracts"
+name = "summits"
 version = "0.1.0"
 authors = ["Felix Niemeyer <niemeyer.felix@gmail.com>"]
 edition = "2018"

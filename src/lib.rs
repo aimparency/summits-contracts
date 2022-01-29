@@ -18,6 +18,22 @@ pub struct Manager {
 
 type NodeId = String; 
 
+#[derive(BorshSerialize, BorshDeserialize)]
+#[derive(Serialize, Deserialize)]
+pub struct FlowKey {
+    from_id: NodeId, 
+    into_id: NodeId
+}
+
+#[derive(BorshDeserialize, BorshSerialize)]
+#[derive(Serialize, Deserialize)]
+pub struct Flow {
+    from_id: NodeId, 
+    into_id: NodeId, 
+    notes: String, 
+    share: f32
+}
+
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct Node {
     pub id: NodeId, 
@@ -40,18 +56,27 @@ pub struct NodeView {
 }
 
 // messages 
-#[derive(Deserialize)]
-pub struct NodeCreation {
+#[derive(Serialize, Deserialize)]
+pub struct NodeUpdate {
     id: NodeId, 
-    title: String, 
-    notes: String, 
-    intrinsic_value: f64, 
+    title: Option<String>, 
+    notes: Option<String>, 
+    intrinsic_value: Option<f64>, 
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct FlowUpdate {
+    from_id: NodeId, 
+    into_id: NodeId, 
+    notes: Option<String>, 
+    share: Option<f32>, 
 }
 
 #[near_bindgen]
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]
 pub struct Summits {
     nodes: LookupMap<String, Node>, 
+    flows: LookupMap<FlowKey, Flow>, 
 }
 
 #[near_bindgen]
@@ -59,7 +84,8 @@ impl Summits {
     #[init]
     pub fn new() -> Self {
         Self {
-            nodes: LookupMap::new(b"nodes".to_vec())
+            nodes: LookupMap::new(b"nodes".to_vec()), 
+            flows: LookupMap::new(b"flows".to_vec())
         }
     }
 
@@ -68,7 +94,7 @@ impl Summits {
     }
 
     // #[payable]
-    pub fn add_node(&mut self, node_creation: NodeCreation) -> Result<(), String> {
+    pub fn add_node(&mut self, node_creation: NodeUpdate) -> Result<(), String> {
         let account_id = env::signer_account_id(); 
         if self.nodes.contains_key(&node_creation.id) {
             Err(format!("a node with id {} already exists", node_creation.id))
@@ -77,9 +103,9 @@ impl Summits {
             // }
             self.nodes.insert(&node_creation.id.clone(), &Node {
                 id: node_creation.id.clone(), 
-                title: node_creation.title, 
-                notes: node_creation.notes, 
-                intrinsic_value: node_creation.intrinsic_value, 
+                title: node_creation.title.unwrap_or("".to_string()), 
+                notes: node_creation.notes.unwrap_or("".to_string()), 
+                intrinsic_value: node_creation.intrinsic_value.unwrap_or(0.), 
                 owner: account_id, 
                 managers: Vector::new(Self::make_storage_key("managers", &node_creation.id)), 
                 flows_from: Vector::new(Self::make_storage_key("flows_from", &node_creation.id)), 
@@ -88,9 +114,95 @@ impl Summits {
             Ok(())
         }
     }
-    pub fn update_node(&mut self) {
-        
+
+    pub fn update_node(&mut self, node_update: NodeUpdate) -> Result<(), String> {
+        match self.nodes.get(&node_update.id) {
+            Some(mut node) => {
+                if let Some(title) = node_update.title {
+                    node.title = title
+                }
+                if let Some(notes) = node_update.notes {
+                    node.notes = notes 
+                }
+                if let Some(intrinsic_value) = node_update.intrinsic_value {
+                    node.intrinsic_value = intrinsic_value
+                }
+                Ok(())
+            }, 
+            None => Err(format!("could not find node with id {} for update", node_update.id))
+        }
     }
+
+    pub fn remove_node(&mut self, node_id: NodeId) -> Result<(), String> {
+        match self.nodes.remove(&node_id) {
+            Some(node) => {
+                for from_id in node.flows_from.iter() {
+                    self.remove_flow(FlowKey {
+                        from_id,
+                        into_id: node.id.clone()
+                    }).ok();
+                }
+                for into_id in node.flows_into.iter() {
+                    self.remove_flow(FlowKey {
+                        from_id: node.id.clone(), 
+                        into_id
+                    }).ok();
+                }
+                Ok(())
+            }
+            None => Err(format!("could not find node with id {} for removal", node_id))
+        }
+    }
+
+    pub fn add_flow(&mut self, flow_creation: FlowUpdate) -> Result<(), String> {
+        match self.nodes.get(&flow_creation.from_id) {
+            Some(mut from_node) => {
+                match self.nodes.get(&flow_creation.into_id) {
+                    Some(mut into_node) => {
+                        let key = FlowKey {
+                            from_id: flow_creation.from_id.clone(), 
+                            into_id: flow_creation.into_id.clone()
+                        };
+                        self.flows.insert(&key, &Flow {
+                            from_id: flow_creation.from_id, 
+                            into_id: flow_creation.into_id, 
+                            notes: flow_creation.notes.unwrap_or("".to_string()), 
+                            share: flow_creation.share.unwrap_or(0.)
+                        }); 
+                        from_node.flows_into.push(&into_node.id); 
+                        into_node.flows_from.push(&from_node.id); 
+                        Ok(())
+                    }, 
+                    None => Err(
+                        format!(
+                            "could not add flow, can't find node with id {}", 
+                            flow_creation.into_id
+                        )
+                    )
+                }
+            }, 
+            None => Err(
+                format!(
+                    "could not add flow, can't find node with id {}", 
+                    flow_creation.from_id
+                )
+            )
+        }
+    }
+
+    pub fn remove_flow(&mut self, flow_key: FlowKey) -> Result<(), String> {
+        if let Some(_) = self.flows.remove(&flow_key) {
+            Ok(())
+        } else {
+            Err(format!(
+                "flow not found, couldn't delete from {} to {}", 
+                flow_key.from_id, 
+                flow_key.into_id
+            ))
+        }
+    }
+
+    
     pub fn get_node(&self, node_id: String) -> Result<NodeView, String> {
         match self.nodes.get(&node_id) {
             Some(node) => Ok(NodeView {
