@@ -1,0 +1,1 @@
+local_near call $ACCOUNT_ID new '{"owner_id": "'$ACCOUNT_ID'"}' --accountId $ACCOUNT_ID
