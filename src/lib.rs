@@ -15,22 +15,24 @@ near_sdk::setup_alloc!();
 
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct Manager {
+    pub account: String, 
+    // permissions
 }
 
-type NodeKey = String; 
+type NodeId = String; 
 
 #[derive(BorshSerialize, BorshDeserialize)]
 #[derive(Serialize, Deserialize)]
 pub struct FlowKey {
-    from_id: NodeKey, 
-    into_id: NodeKey
+    from_id: NodeId, 
+    into_id: NodeId
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
 #[derive(Serialize, Deserialize)]
 pub struct Flow {
-    from_id: NodeKey, 
-    into_id: NodeKey, 
+    from_id: NodeId, 
+    into_id: NodeId, 
     dx: f32, 
     dy: f32, 
     notes: String, 
@@ -39,19 +41,19 @@ pub struct Flow {
 
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct Node {
-    pub id: NodeKey, 
+    pub id: NodeId, 
     pub title: String, 
     pub notes: String, 
     pub deposit: u128, 
     pub owner: String, 
     pub managers: Vector<Manager>, 
-    pub flows_into: Vector<NodeKey>, 
-    pub flows_from: Vector<NodeKey>
+    pub flows_into: Vector<NodeId>, 
+    pub flows_from: Vector<NodeId>
 }
 
 #[derive(Serialize)]
 pub struct NodeView {
-    pub id: NodeKey, 
+    pub id: NodeId, 
     pub title: String, 
     pub notes: String, 
     pub deposit: u128, 
@@ -60,8 +62,7 @@ pub struct NodeView {
 
 // messages 
 #[derive(Serialize, Deserialize)]
-pub struct NodeUpdate {
-    id: NodeKey, 
+pub struct NodeChanges {
     title: Option<String>, 
     notes: Option<String>
 }
@@ -88,9 +89,9 @@ pub struct FlowUpdate {
 #[near_bindgen]
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]
 pub struct Summits {
-    nodes: LookupMap<NodeKey, Node>, 
+    nodes: LookupMap<NodeId, Node>, 
     flows: LookupMap<FlowKey, Flow>, 
-    seven_summits: Vector<NodeKey>
+    seven_summits: Vector<NodeId>
 }
 
 #[near_bindgen]
@@ -104,14 +105,14 @@ impl Summits {
         }
     }
 
-    fn make_storage_key(key: &str, id: &NodeKey) -> Vec<u8> {
+    fn make_storage_key(key: &str, id: &NodeId) -> Vec<u8> {
         format!("node[{}].{}", id, key).as_bytes().to_vec() 
     }
 
     // #[payable in gov coin]
-    pub fn create_node_with_value(
+    pub fn create_node(
         &mut self, 
-        id: NodeKey, 
+        id: NodeId, 
         title: String, 
         notes: String, 
         deposit: u128 
@@ -139,15 +140,13 @@ impl Summits {
         }
     }
 
-    // pub fn create_node_with_intial_flow( ... ) 
-
-    fn seven_summits_surpassing(&mut self, id: NodeKey) {
+    fn seven_summits_surpassing(&mut self, id: NodeId) {
         if self.seven_summits.len() < 7 {
             self.seven_summits.push(&id)
         }
     }
 
-    pub fn deposit_value (&mut self, node_id: NodeKey, value: u128) -> Result<(), String> {
+    pub fn deposit_value (&mut self, node_id: NodeId, value: u128) -> Result<(), String> {
         match self.nodes.get(&node_id) {
             Some(mut node) => {
                 // TODO: check funds, deduct 
@@ -161,7 +160,7 @@ impl Summits {
         }
     }
 
-    pub fn withdraw_value (&mut self, node_id: NodeKey, value: u128) -> Result<(), String> {
+    pub fn withdraw_value (&mut self, node_id: NodeId, value: u128) -> Result<(), String> {
         match self.nodes.get(&node_id) {
             Some(mut node) => {
                 // TODO: payout funds
@@ -175,22 +174,22 @@ impl Summits {
         }
     }
 
-    pub fn update_node(&mut self, node_update: NodeUpdate) -> Result<(), String> {
-        match self.nodes.get(&node_update.id) {
+    pub fn change_node(&mut self, node_id: NodeId, changes: NodeChanges) -> Result<(), String> {
+        match self.nodes.get(&node_id) {
             Some(mut node) => {
-                if let Some(title) = node_update.title {
+                if let Some(title) = changes.title {
                     node.title = title
                 }
-                if let Some(notes) = node_update.notes {
+                if let Some(notes) = changes.notes {
                     node.notes = notes 
                 }
                 Ok(())
             }, 
-            None => Err(format!("could not find node with id {} for update", node_update.id))
+            None => Err(format!("could not find node with id {} for update", node_id))
         }
     }
 
-    pub fn remove_node(&mut self, node_id: NodeKey) -> Result<(), String> {
+    pub fn remove_node(&mut self, node_id: NodeId) -> Result<(), String> {
         match self.nodes.remove(&node_id) {
             Some(node) => {
                 for from_id in node.flows_from.iter() {
@@ -349,7 +348,7 @@ impl Summits {
         }
     }
 
-    pub fn get_seven_summits(&self) -> Result<Vec<NodeKey>, String> {
+    pub fn get_seven_summits(&self) -> Result<Vec<NodeId>, String> {
         Ok(self.seven_summits.iter().collect())
     }
 }
