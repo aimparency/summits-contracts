@@ -23,7 +23,7 @@ type NodeId = String;
 
 #[derive(BorshSerialize, BorshDeserialize)]
 #[derive(Serialize, Deserialize)]
-pub struct FlowKey {
+pub struct FlowId {
     from_id: NodeId, 
     into_id: NodeId
 }
@@ -31,8 +31,7 @@ pub struct FlowKey {
 #[derive(BorshDeserialize, BorshSerialize)]
 #[derive(Serialize, Deserialize)]
 pub struct Flow {
-    from_id: NodeId, 
-    into_id: NodeId, 
+    id: FlowId, 
     dx: f32, 
     dy: f32, 
     notes: String, 
@@ -67,19 +66,9 @@ pub struct NodeChanges {
     notes: Option<String>
 }
 
-
-#[derive(Serialize, Deserialize)]
-pub struct FlowCreation {
-    key: FlowKey, 
-    dx: f32, 
-    dy: f32, 
-    notes: String, 
-    share: f32, 
-}
-
 #[derive(Serialize, Deserialize)]
 pub struct FlowUpdate {
-    key: FlowKey, 
+    id: FlowId, 
     dx: Option<f32>, 
     dy: Option<f32>, 
     notes: Option<String>, 
@@ -90,7 +79,7 @@ pub struct FlowUpdate {
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]
 pub struct Summits {
     nodes: LookupMap<NodeId, Node>, 
-    flows: LookupMap<FlowKey, Flow>, 
+    flows: LookupMap<FlowId, Flow>, 
     seven_summits: Vector<NodeId>
 }
 
@@ -193,13 +182,13 @@ impl Summits {
         match self.nodes.remove(&node_id) {
             Some(node) => {
                 for from_id in node.flows_from.iter() {
-                    self.remove_flow(FlowKey {
+                    self.remove_flow(FlowId {
                         from_id,
                         into_id: node.id.clone()
                     }).ok();
                 }
                 for into_id in node.flows_into.iter() {
-                    self.remove_flow(FlowKey {
+                    self.remove_flow(FlowId {
                         from_id: node.id.clone(), 
                         into_id
                     }).ok();
@@ -210,22 +199,31 @@ impl Summits {
         }
     }
 
-    pub fn create_flow(&mut self, flow_creation: FlowCreation) -> Result<(), String> {
-        match self.nodes.get(&flow_creation.key.from_id) {
+    pub fn create_flow(
+        &mut self, 
+        id: FlowId, 
+        dx: f32, 
+        dy: f32, 
+        notes: String, 
+        share: f32, 
+    ) -> Result<(), String> {
+        match self.nodes.get(&id.from_id) {
             Some(mut from_node) => {
-                match self.nodes.get(&flow_creation.key.into_id) {
+                match self.nodes.get(&id.into_id) {
                     Some(mut into_node) => {
-                        let key = FlowKey {
-                            from_id: flow_creation.key.from_id.clone(), 
-                            into_id: flow_creation.key.into_id.clone()
+                        let id = FlowId {
+                            from_id: id.from_id.clone(), 
+                            into_id: id.into_id.clone()
                         };
-                        self.flows.insert(&key, &Flow {
-                            from_id: flow_creation.key.from_id, 
-                            into_id: flow_creation.key.into_id, 
-                            dx: flow_creation.dx, 
-                            dy: flow_creation.dy, 
-                            notes: flow_creation.notes, 
-                            share: flow_creation.share
+                        self.flows.insert(&id, &Flow {
+                            id: FlowId {
+                                from_id: id.from_id.clone(), 
+                                into_id: id.into_id.clone(), 
+                            }, 
+                            dx, 
+                            dy, 
+                            notes, 
+                            share
                         }); 
                         from_node.flows_into.push(&into_node.id); 
                         into_node.flows_from.push(&from_node.id); 
@@ -234,7 +232,7 @@ impl Summits {
                     None => Err(
                         format!(
                             "could not add flow, can't find node with id {}", 
-                            flow_creation.key.into_id
+                            id.into_id
                         )
                     )
                 }
@@ -242,14 +240,14 @@ impl Summits {
             None => Err(
                 format!(
                     "could not add flow, can't find node with id {}", 
-                    flow_creation.key.from_id
+                    id.from_id
                 )
             )
         }
     }
 
     pub fn update_flow(&mut self, flow_update: FlowUpdate) -> Result<(), String> {
-        match self.flows.get(&flow_update.key) {
+        match self.flows.get(&flow_update.id) {
             Some(mut flow) => {
                 if let Some(dx) = flow_update.dx {
                     flow.dx = dx; 
@@ -267,20 +265,20 @@ impl Summits {
             }, 
             None => Err(format!( 
                 "could not find flow from {} into {}", 
-                flow_update.key.from_id, 
-                flow_update.key.into_id
+                flow_update.id.from_id, 
+                flow_update.id.into_id
             ))
         }
     }
 
-    pub fn remove_flow(&mut self, flow_key: FlowKey) -> Result<(), String> {
-        if let Some(_) = self.flows.remove(&flow_key) {
+    pub fn remove_flow(&mut self, flow_id: FlowId) -> Result<(), String> {
+        if let Some(_) = self.flows.remove(&flow_id) {
             Ok(())
         } else {
             Err(format!(
                 "flow not found, couldn't delete from {} to {}", 
-                flow_key.from_id, 
-                flow_key.into_id
+                flow_id.from_id, 
+                flow_id.into_id
             ))
         }
     }
@@ -305,7 +303,7 @@ impl Summits {
             Some(node) => {
                 let mut result = vec![];
                 for from_id in node.flows_from.iter() {
-                    match self.flows.get(&FlowKey {
+                    match self.flows.get(&FlowId {
                         from_id, 
                         into_id: node_id.clone()
                     }) {
@@ -317,7 +315,7 @@ impl Summits {
                     }
                 }
                 for into_id in node.flows_into.iter() {
-                    match self.flows.get(&FlowKey {
+                    match self.flows.get(&FlowId {
                         from_id: node_id.clone(), 
                         into_id
                     }) {
@@ -337,13 +335,13 @@ impl Summits {
         }
     }
 
-    pub fn get_flow(&self, flow_key: FlowKey) -> Result<Flow, String> {
-        match self.flows.get(&flow_key) {
+    pub fn get_flow(&self, flow_id: FlowId) -> Result<Flow, String> {
+        match self.flows.get(&flow_id) {
             Some(flow) => Ok(flow), 
             None => Err(format!(
                 "could not find flow from {} to {}", 
-                flow_key.from_id, 
-                flow_key.into_id
+                flow_id.from_id, 
+                flow_id.into_id
             ))
         }
     }
