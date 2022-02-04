@@ -24,8 +24,8 @@ type NodeId = String;
 #[derive(BorshSerialize, BorshDeserialize)]
 #[derive(Serialize, Deserialize)]
 pub struct FlowId {
-    from_id: NodeId, 
-    into_id: NodeId
+    from: NodeId, 
+    into: NodeId
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
@@ -140,6 +140,7 @@ impl Summits {
             Some(mut node) => {
                 // TODO: check funds, deduct 
                 node.deposit += value; 
+                self.nodes.insert(&node_id, &node); 
                 Ok(())
             }, 
             None => Err(format!(
@@ -154,6 +155,7 @@ impl Summits {
             Some(mut node) => {
                 // TODO: payout funds
                 node.deposit -= value; 
+                self.nodes.insert(&node_id, &node); 
                 Ok(())
             }, 
             None => Err(format!(
@@ -172,6 +174,7 @@ impl Summits {
                 if let Some(notes) = changes.notes {
                     node.notes = notes 
                 }
+                self.nodes.insert(&node_id, &node); 
                 Ok(())
             }, 
             None => Err(format!("could not find node with id {} for update", node_id))
@@ -183,14 +186,14 @@ impl Summits {
             Some(node) => {
                 for from_id in node.flows_from.iter() {
                     self.remove_flow(FlowId {
-                        from_id,
-                        into_id: node.id.clone()
+                        from: from_id, 
+                        into: node.id.clone()
                     }).ok();
                 }
                 for into_id in node.flows_into.iter() {
                     self.remove_flow(FlowId {
-                        from_id: node.id.clone(), 
-                        into_id
+                        from: node.id.clone(), 
+                        into: into_id
                     }).ok();
                 }
                 Ok(())
@@ -207,18 +210,18 @@ impl Summits {
         notes: String, 
         share: f32, 
     ) -> Result<(), String> {
-        match self.nodes.get(&id.from_id) {
+        match self.nodes.get(&id.from) {
             Some(mut from_node) => {
-                match self.nodes.get(&id.into_id) {
+                match self.nodes.get(&id.into) {
                     Some(mut into_node) => {
                         let id = FlowId {
-                            from_id: id.from_id.clone(), 
-                            into_id: id.into_id.clone()
+                            from: id.from.clone(), 
+                            into: id.into.clone()
                         };
                         self.flows.insert(&id, &Flow {
                             id: FlowId {
-                                from_id: id.from_id.clone(), 
-                                into_id: id.into_id.clone(), 
+                                from: id.from.clone(), 
+                                into: id.into.clone(), 
                             }, 
                             dx, 
                             dy, 
@@ -227,12 +230,14 @@ impl Summits {
                         }); 
                         from_node.flows_into.push(&into_node.id); 
                         into_node.flows_from.push(&from_node.id); 
+                        self.nodes.insert(&from_node.id, &from_node); 
+                        self.nodes.insert(&into_node.id, &into_node); 
                         Ok(())
                     }, 
                     None => Err(
                         format!(
                             "could not add flow, can't find node with id {}", 
-                            id.into_id
+                            id.into
                         )
                     )
                 }
@@ -240,13 +245,13 @@ impl Summits {
             None => Err(
                 format!(
                     "could not add flow, can't find node with id {}", 
-                    id.from_id
+                    id.from
                 )
             )
         }
     }
 
-    pub fn update_flow(&mut self, flow_update: FlowUpdate) -> Result<(), String> {
+    pub fn change_flow(&mut self, flow_update: FlowUpdate) -> Result<(), String> {
         match self.flows.get(&flow_update.id) {
             Some(mut flow) => {
                 if let Some(dx) = flow_update.dx {
@@ -265,8 +270,8 @@ impl Summits {
             }, 
             None => Err(format!( 
                 "could not find flow from {} into {}", 
-                flow_update.id.from_id, 
-                flow_update.id.into_id
+                flow_update.id.from, 
+                flow_update.id.into
             ))
         }
     }
@@ -277,8 +282,8 @@ impl Summits {
         } else {
             Err(format!(
                 "flow not found, couldn't delete from {} to {}", 
-                flow_id.from_id, 
-                flow_id.into_id
+                flow_id.from, 
+                flow_id.into
             ))
         }
     }
@@ -304,8 +309,8 @@ impl Summits {
                 let mut result = vec![];
                 for from_id in node.flows_from.iter() {
                     match self.flows.get(&FlowId {
-                        from_id, 
-                        into_id: node_id.clone()
+                        from: from_id, 
+                        into: node_id.clone()
                     }) {
                         Some(flow) => {
                             result.push(flow)
@@ -316,8 +321,8 @@ impl Summits {
                 }
                 for into_id in node.flows_into.iter() {
                     match self.flows.get(&FlowId {
-                        from_id: node_id.clone(), 
-                        into_id
+                        from: node_id.clone(), 
+                        into: into_id
                     }) {
                         Some(flow) => {
                             result.push(flow)
@@ -340,8 +345,8 @@ impl Summits {
             Some(flow) => Ok(flow), 
             None => Err(format!(
                 "could not find flow from {} to {}", 
-                flow_id.from_id, 
-                flow_id.into_id
+                flow_id.from, 
+                flow_id.into
             ))
         }
     }
