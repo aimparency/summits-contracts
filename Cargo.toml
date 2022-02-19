@@ -2,14 +2,14 @@
 name = "summits"
 version = "0.1.0"
 authors = ["Felix Niemeyer <niemeyer.felix@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"
-near-sdk = "3.1.0"
+near-sdk = "4.0.0-pre.7"
 
 [lib]
 crate-type = ["cdylib"]

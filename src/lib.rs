@@ -11,8 +11,6 @@ use near_sdk::{
 
 use serde::{Serialize, Deserialize}; 
 
-near_sdk::setup_alloc!();
-
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct Manager {
     pub account: String, 
@@ -43,7 +41,7 @@ pub struct Node {
     pub id: NodeId, 
     pub title: String, 
     pub notes: String, 
-    pub deposit: u128, 
+    pub deposit: f64, // this may be u128 in the to represent currency
     pub owner: String, 
     pub managers: Vector<Manager>, 
     pub flows_into: Vector<NodeId>, 
@@ -55,7 +53,7 @@ pub struct NodeView {
     pub id: NodeId, 
     pub title: String, 
     pub notes: String, 
-    pub deposit: u128, 
+    pub deposit: f64, 
     pub owner: String, 
 }
 
@@ -63,12 +61,12 @@ pub struct NodeView {
 #[derive(Serialize, Deserialize)]
 pub struct NodeChanges {
     title: Option<String>, 
-    notes: Option<String>
+    notes: Option<String>, 
+    deposit: Option<f64>
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct FlowUpdate {
-    id: FlowId, 
+pub struct FlowChanges{
     dx: Option<f32>, 
     dy: Option<f32>, 
     notes: Option<String>, 
@@ -80,7 +78,7 @@ pub struct FlowUpdate {
 pub struct Summits {
     nodes: LookupMap<NodeId, Node>, 
     flows: LookupMap<FlowId, Flow>, 
-    seven_summits: Vector<NodeId>
+    home_node_id: Option<NodeId>
 }
 
 #[near_bindgen]
@@ -90,7 +88,7 @@ impl Summits {
         Self {
             nodes: LookupMap::new(b"nodes".to_vec()), 
             flows: LookupMap::new(b"flows".to_vec()), 
-            seven_summits: Vector::new(b"seven".to_vec()),
+            home_node_id: None,
         }
     }
 
@@ -104,8 +102,8 @@ impl Summits {
         id: NodeId, 
         title: String, 
         notes: String, 
-        deposit: u128 
-        ) -> Result<(), String> {
+        deposit: f64
+    ) -> Result<(), String> {
         let account_id = env::signer_account_id(); 
         if self.nodes.contains_key(&id) {
             Err(format!("a node with id {} already exists", id))
@@ -117,56 +115,52 @@ impl Summits {
                 title, 
                 notes, 
                 deposit, 
-                owner: account_id, 
+                owner: account_id.to_string(), 
                 managers: Vector::new(Self::make_storage_key("managers", &id)), 
                 flows_from: Vector::new(Self::make_storage_key("flows_from", &id)), 
                 flows_into: Vector::new(Self::make_storage_key("flows_into", &id)), 
             });
 
-            self.seven_summits_surpassing(id); 
-
             Ok(())
         }
     }
 
-    fn seven_summits_surpassing(&mut self, id: NodeId) {
-        if self.seven_summits.len() < 7 {
-            self.seven_summits.push(&id)
-        }
-    }
-
-    pub fn deposit_value (&mut self, node_id: NodeId, value: u128) -> Result<(), String> {
-        match self.nodes.get(&node_id) {
+    pub fn deposit_value (&mut self, id: NodeId, value: f64) -> Result<(), String> {
+        match self.nodes.get(&id) {
             Some(mut node) => {
                 // TODO: check funds, deduct 
                 node.deposit += value; 
-                self.nodes.insert(&node_id, &node); 
+                self.nodes.insert(&id, &node); 
                 Ok(())
             }, 
             None => Err(format!(
                 "could not find node with id {}", 
-                node_id
+                id
             ))
         }
     }
 
-    pub fn withdraw_value (&mut self, node_id: NodeId, value: u128) -> Result<(), String> {
-        match self.nodes.get(&node_id) {
+    pub fn withdraw_value (&mut self, id: NodeId, value: f64) -> Result<(), String> {
+        match self.nodes.get(&id) {
             Some(mut node) => {
                 // TODO: payout funds
                 node.deposit -= value; 
-                self.nodes.insert(&node_id, &node); 
+                self.nodes.insert(&id, &node); 
                 Ok(())
             }, 
             None => Err(format!(
                 "could not find node with id {}", 
-                node_id
+                id 
             ))
         }
     }
 
-    pub fn change_node(&mut self, node_id: NodeId, changes: NodeChanges) -> Result<(), String> {
-        match self.nodes.get(&node_id) {
+    pub fn change_node(
+        &mut self, 
+        id: NodeId, 
+        changes: NodeChanges, 
+    ) -> Result<(), String> {
+        match self.nodes.get(&id) {
             Some(mut node) => {
                 if let Some(title) = changes.title {
                     node.title = title
@@ -174,15 +168,18 @@ impl Summits {
                 if let Some(notes) = changes.notes {
                     node.notes = notes 
                 }
-                self.nodes.insert(&node_id, &node); 
+                if let Some(deposit) = changes.deposit {
+                    node.deposit = deposit 
+                }
+                self.nodes.insert(&id, &node); 
                 Ok(())
             }, 
-            None => Err(format!("could not find node with id {} for update", node_id))
+            None => Err(format!("could not find node with id {} for update", id))
         }
     }
 
-    pub fn remove_node(&mut self, node_id: NodeId) -> Result<(), String> {
-        match self.nodes.remove(&node_id) {
+    pub fn remove_node(&mut self, id: NodeId) -> Result<(), String> {
+        match self.nodes.remove(&id) {
             Some(node) => {
                 for from_id in node.flows_from.iter() {
                     self.remove_flow(FlowId {
@@ -196,9 +193,14 @@ impl Summits {
                         into: into_id
                     }).ok();
                 }
+                if let Some(home_id) = self.home_node_id.clone() {
+                    if home_id == id {
+                        self.home_node_id = None
+                    }
+                }
                 Ok(())
             }
-            None => Err(format!("could not find node with id {} for removal", node_id))
+            None => Err(format!("could not find node with id {} for removal", id))
         }
     }
 
@@ -251,45 +253,46 @@ impl Summits {
         }
     }
 
-    pub fn change_flow(&mut self, flow_update: FlowUpdate) -> Result<(), String> {
-        match self.flows.get(&flow_update.id) {
+    pub fn change_flow(&mut self, id: FlowId, changes: FlowChanges) -> Result<(), String> {
+        match self.flows.get(&id) {
             Some(mut flow) => {
-                if let Some(dx) = flow_update.dx {
+                if let Some(dx) = changes.dx {
                     flow.dx = dx; 
                 }
-                if let Some(dy) = flow_update.dy {
+                if let Some(dy) = changes.dy {
                     flow.dy = dy; 
                 }
-                if let Some(notes) = flow_update.notes {
+                if let Some(notes) = changes.notes {
                     flow.notes = notes; 
                 }
-                if let Some(share) = flow_update.share {
+                if let Some(share) = changes.share {
                     flow.share = share; 
                 }
+                self.flows.insert(&id, &flow); 
                 Ok(())
             }, 
             None => Err(format!( 
                 "could not find flow from {} into {}", 
-                flow_update.id.from, 
-                flow_update.id.into
+                id.from, 
+                id.into
             ))
         }
     }
 
-    pub fn remove_flow(&mut self, flow_id: FlowId) -> Result<(), String> {
-        if let Some(_) = self.flows.remove(&flow_id) {
+    pub fn remove_flow(&mut self, id: FlowId) -> Result<(), String> {
+        if let Some(_) = self.flows.remove(&id) {
             Ok(())
         } else {
             Err(format!(
                 "flow not found, couldn't delete from {} to {}", 
-                flow_id.from, 
-                flow_id.into
+                id.from, 
+                id.into
             ))
         }
     }
 
-    pub fn get_node(&self, node_id: String) -> Result<NodeView, String> {
-        match self.nodes.get(&node_id) {
+    pub fn get_node(&self, id: String) -> Result<NodeView, String> {
+        match self.nodes.get(&id) {
             Some(node) => Ok(NodeView {
                 id: node.id, 
                 title: node.title, 
@@ -298,19 +301,19 @@ impl Summits {
                 deposit: node.deposit
             }), 
             None => Err(
-                format!("could not find node by provided id {}", node_id)
+                format!("could not find node by provided id {}", id)
             )
         }
     }
 
-    pub fn get_node_flows(&self, node_id: String) -> Result<Vec<Flow>, String> {
-        match self.nodes.get(&node_id) {
+    pub fn get_node_flows(&self, id: String) -> Result<Vec<Flow>, String> {
+        match self.nodes.get(&id) {
             Some(node) => {
                 let mut result = vec![];
                 for from_id in node.flows_from.iter() {
                     match self.flows.get(&FlowId {
                         from: from_id, 
-                        into: node_id.clone()
+                        into: id.clone()
                     }) {
                         Some(flow) => {
                             result.push(flow)
@@ -321,7 +324,7 @@ impl Summits {
                 }
                 for into_id in node.flows_into.iter() {
                     match self.flows.get(&FlowId {
-                        from: node_id.clone(), 
+                        from: id.clone(), 
                         into: into_id
                     }) {
                         Some(flow) => {
@@ -335,24 +338,36 @@ impl Summits {
             }, 
             None => Err(format!(
                 "could not find node {}", 
-                node_id
+                id 
             ))
         }
     }
 
-    pub fn get_flow(&self, flow_id: FlowId) -> Result<Flow, String> {
-        match self.flows.get(&flow_id) {
+    pub fn get_flow(&self, id: FlowId) -> Result<Flow, String> {
+        match self.flows.get(&id) {
             Some(flow) => Ok(flow), 
             None => Err(format!(
                 "could not find flow from {} to {}", 
-                flow_id.from, 
-                flow_id.into
+                id.from, 
+                id.into
             ))
         }
     }
 
-    pub fn get_seven_summits(&self) -> Result<Vec<NodeId>, String> {
-        Ok(self.seven_summits.iter().collect())
+    pub fn set_home_node_id(&mut self, id: NodeId) -> Result<(), String> {
+        self.home_node_id = Some(id);
+        Ok(())
+    }
+
+    pub fn get_home_node_id(&self) -> Result<NodeId, String> {
+        match &self.home_node_id {
+            Some(id) => {
+                Ok(id.into())
+            }, 
+            None => {
+                Err("Home node id not set".to_string()) 
+            }
+        }
     }
 }
 
