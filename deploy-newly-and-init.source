@@ -1,0 +1,6 @@
+local_near dev-deploy --wasmFile target/wasm32-unknown-unknown/release/summits.wasm -f
+ACCOUNT_ID=`cat ./neardev/dev-account`
+local_near call $ACCOUNT_ID new '{"owner_id": "'$ACCOUNT_ID'"}' --accountId $ACCOUNT_ID
+
+echo 
+echo $ACCOUNT_ID
