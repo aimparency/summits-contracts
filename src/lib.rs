@@ -73,6 +73,12 @@ pub struct FlowChanges{
     share: Option<f32>, 
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct WrappedFlowChanges {
+    id: FlowId,  
+    changes: FlowChanges
+}
+
 #[near_bindgen]
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]
 pub struct Summits {
@@ -179,6 +185,13 @@ impl Summits {
     }
 
     pub fn remove_node(&mut self, id: NodeId) -> Result<(), String> {
+        if let Some(home_id) = &self.home_node_id {
+            if home_id.eq(&id) {
+                return Err(format!(
+                    "cannot remove home node, it's your anchor to the graph"  
+                ))
+            }
+        }
         match self.nodes.remove(&id) {
             Some(node) => {
                 for from_id in node.flows_from.iter() {
@@ -276,6 +289,25 @@ impl Summits {
                 id.from, 
                 id.into
             ))
+        }
+    }
+    pub fn bulk_change_flow(&mut self, bulk: Vec<WrappedFlowChanges>) -> Result<(), String> {
+        let mut errors = Vec::new();
+        for wrapped_change in bulk {
+            match self.change_flow(
+                wrapped_change.id, 
+                wrapped_change.changes
+            ) {
+                Err(err) => {
+                    errors.push(err) 
+                }, 
+                _ => ()
+            }
+        }
+        if errors.len() == 0 {
+            Ok(())
+        } else {
+            Err(errors.join(". "))
         }
     }
 
