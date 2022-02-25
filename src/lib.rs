@@ -43,6 +43,7 @@ pub struct Node {
     pub notes: String, 
     pub deposit: f64, // this may be u128 in the to represent currency
     pub owner: String, 
+    pub state: String,
     pub managers: Vector<Manager>, 
     pub flows_into: Vector<NodeId>, 
     pub flows_from: Vector<NodeId>
@@ -54,7 +55,8 @@ pub struct NodeView {
     pub title: String, 
     pub notes: String, 
     pub deposit: f64, 
-    pub owner: String, 
+    pub owner: String,
+    pub state: String
 }
 
 // messages 
@@ -62,7 +64,8 @@ pub struct NodeView {
 pub struct NodeChanges {
     title: Option<String>, 
     notes: Option<String>, 
-    deposit: Option<f64>
+    deposit: Option<f64>, 
+    state: Option<String>, 
 }
 
 #[derive(Serialize, Deserialize)]
@@ -108,7 +111,8 @@ impl Summits {
         id: NodeId, 
         title: String, 
         notes: String, 
-        deposit: f64
+        deposit: f64, 
+        state: String,
     ) -> Result<(), String> {
         let account_id = env::signer_account_id(); 
         if self.nodes.contains_key(&id) {
@@ -121,6 +125,7 @@ impl Summits {
                 title, 
                 notes, 
                 deposit, 
+                state, 
                 owner: account_id.to_string(), 
                 managers: Vector::new(Self::make_storage_key("managers", &id)), 
                 flows_from: Vector::new(Self::make_storage_key("flows_from", &id)), 
@@ -176,6 +181,9 @@ impl Summits {
                 }
                 if let Some(deposit) = changes.deposit {
                     node.deposit = deposit 
+                }
+                if let Some(state) = changes.state {
+                    node.state = state 
                 }
                 self.nodes.insert(&id, &node); 
                 Ok(())
@@ -330,7 +338,8 @@ impl Summits {
                 title: node.title, 
                 notes: node.notes, 
                 owner: node.owner, 
-                deposit: node.deposit
+                deposit: node.deposit, 
+                state: node.state
             }), 
             None => Err(
                 format!("could not find node by provided id {}", id)
