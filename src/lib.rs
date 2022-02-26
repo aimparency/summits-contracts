@@ -36,17 +36,24 @@ pub struct Flow {
     share: f32
 }
 
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize)]
+pub struct Effort {
+    unit: u8, 
+    amount: f64
+}
+
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct Node {
     pub id: NodeId, 
     pub title: String, 
     pub notes: String, 
     pub deposit: f64, // this may be u128 in the to represent currency
-    pub owner: String, 
     pub state: String,
+    pub effort: Effort,
+    pub owner: String, 
     pub managers: Vector<Manager>, 
     pub flows_into: Vector<NodeId>, 
-    pub flows_from: Vector<NodeId>
+    pub flows_from: Vector<NodeId>, 
 }
 
 #[derive(Serialize)]
@@ -54,9 +61,10 @@ pub struct NodeView {
     pub id: NodeId, 
     pub title: String, 
     pub notes: String, 
+    pub state: String,
+    pub effort: Effort,  
     pub deposit: f64, 
     pub owner: String,
-    pub state: String
 }
 
 // messages 
@@ -66,6 +74,7 @@ pub struct NodeChanges {
     notes: Option<String>, 
     deposit: Option<f64>, 
     state: Option<String>, 
+    effort: Option<Effort>
 }
 
 #[derive(Serialize, Deserialize)]
@@ -111,8 +120,9 @@ impl Summits {
         id: NodeId, 
         title: String, 
         notes: String, 
-        deposit: f64, 
         state: String,
+        effort: Effort, 
+        deposit: f64, 
     ) -> Result<(), String> {
         let account_id = env::signer_account_id(); 
         if self.nodes.contains_key(&id) {
@@ -124,8 +134,9 @@ impl Summits {
                 id: id.clone(), 
                 title, 
                 notes, 
-                deposit, 
                 state, 
+                effort, 
+                deposit, 
                 owner: account_id.to_string(), 
                 managers: Vector::new(Self::make_storage_key("managers", &id)), 
                 flows_from: Vector::new(Self::make_storage_key("flows_from", &id)), 
@@ -179,11 +190,14 @@ impl Summits {
                 if let Some(notes) = changes.notes {
                     node.notes = notes 
                 }
-                if let Some(deposit) = changes.deposit {
-                    node.deposit = deposit 
+                if let Some(effort) = changes.effort {
+                    node.effort = effort
                 }
                 if let Some(state) = changes.state {
                     node.state = state 
+                }
+                if let Some(deposit) = changes.deposit {
+                    node.deposit = deposit 
                 }
                 self.nodes.insert(&id, &node); 
                 Ok(())
@@ -337,9 +351,10 @@ impl Summits {
                 id: node.id, 
                 title: node.title, 
                 notes: node.notes, 
-                owner: node.owner, 
+                state: node.state, 
+                effort: node.effort, 
                 deposit: node.deposit, 
-                state: node.state
+                owner: node.owner, 
             }), 
             None => Err(
                 format!("could not find node by provided id {}", id)
